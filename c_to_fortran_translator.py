@@ -1,5 +1,3 @@
-from util import remove_newlines_in_quotes
-
 #!/usr/bin/env python3
 """
 Main translator class for converting C code to Fortran.
@@ -39,88 +37,91 @@ class CToFortranTranslator:
             raise
 
     def translate_code(self, c_code):
-        """Translate C code to Fortran."""
+        """Translate C code to Fortran with non-main functions in a module."""
         # Preprocess: remove preprocessor directives
         c_code = self.remove_preprocessor_directives(c_code)
         
-        # Extract functions and translate them
+        # Extract functions from the C code.
         c_functions = self.extract_functions(c_code)
         
-        # Start with program header
-        fortran_code = "program main\n"
-        fortran_code += "implicit none\n"
+        # Separate main and non-main functions.
+        main_body = None
+        non_main_funcs = {}
+        for func_name, body in c_functions.items():
+            if func_name == "main":
+                main_body = body
+            else:
+                non_main_funcs[func_name] = body
         
-        # Add main function body
-        if "main" in c_functions:
-            main_body = c_functions.pop("main")  # Remove main from functions dict
+        # Build module code if there are any non-main functions.
+        module_code = ""
+        used_function_names = []
+        if non_main_funcs:
+            module_code += "module m_mod\n"
+            module_code += "  implicit none\n"
+            module_code += "contains\n\n"
+            for func_name, func_body in non_main_funcs.items():
+                self.current_function = func_name
+                func_info = self.functions[func_name]
+                return_type = func_info["return_type"]
+                params = func_info["params"]
+                fortran_type = self.translate_type(return_type)
+                # Build function or subroutine definition.
+                if fortran_type.lower() == "void":
+                    module_code += f"subroutine {func_name}("
+                else:
+                    module_code += f"function {func_name}("
+                param_list = []
+                for param in params:
+                    param_name = param.split()[-1].replace("*", "").replace("&", "")
+                    param_list.append(param_name)
+                module_code += ", ".join(param_list)
+                if fortran_type.lower() == "void":
+                    module_code += ")\n"
+                else:
+                    module_code += f") result({func_name}_result)\n"
+                module_code += "  implicit none\n"
+                for param in params:
+                    param_parts = param.split()
+                    param_type = " ".join(param_parts[:-1])
+                    param_name = param_parts[-1].replace("*", "").replace("&", "")
+                    fortran_type_param = self.translate_type(param_type)
+                    module_code += f"  {fortran_type_param}, intent(in) :: {param_name}\n"
+                if fortran_type.lower() != "void":
+                    module_code += f"  {fortran_type} :: {func_name}_result\n"
+                # Translate function body.
+                translated_body = self.translate_function_body_iterative(func_body)
+                module_code += translated_body
+                if fortran_type.lower() == "void":
+                    module_code += f"end subroutine {func_name}\n\n"
+                else:
+                    module_code += f"end function {func_name}\n\n"
+                used_function_names.append(func_name)
+            module_code += "end module m_mod\n\n"
+        
+        # Build main program.
+        main_prog = ""
+        main_prog += "program main\n"
+        # If there are non-main functions, add a use statement.
+        if used_function_names:
+            main_prog += "use m_mod, only: " + ", ".join(used_function_names) + "\n"
+        main_prog += "  implicit none\n\n"
+        if main_body:
             self.current_function = "main"
-            
-            # Translate main function body
-            translated_body = self.translate_function_body_iterative(main_body, is_main=True)
-            fortran_code += translated_body
-            fortran_code += "\nend program main\n\n"
+            translated_main = self.translate_function_body_iterative(main_body, is_main=True)
+            main_prog += translated_main
         else:
-            fortran_code += "  ! No main function found\n"
-            fortran_code += "end program main\n\n"
+            main_prog += "  ! No main function found\n"
+        main_prog += "\nend program main\n\n"
         
-        # Add function implementations after the main program
-        for func_name, func_body in c_functions.items():
-            self.current_function = func_name
-            func_info = self.functions[func_name]
-            return_type = func_info["return_type"]
-            params = func_info["params"]
-            
-            fortran_type = self.translate_type(return_type)
-            
-            # Function or subroutine?
-            if fortran_type.lower() == "void":
-                fortran_code += f"subroutine {func_name}("
-            else:
-                fortran_code += f"function {func_name}("
-            
-            # Translate parameters
-            param_list = []
-            for param in params:
-                param_name = param.split()[-1].replace("*", "").replace("&", "")
-                param_list.append(param_name)
-            
-            fortran_code += ", ".join(param_list)
-            
-            if fortran_type.lower() == "void":
-                fortran_code += ")\n"
-            else:
-                fortran_code += f") result({func_name}_result)\n"
-            
-            fortran_code += "  implicit none\n"
-            
-            # Declare parameters
-            for param in params:
-                param_parts = param.split()
-                param_type = " ".join(param_parts[:-1])
-                param_name = param_parts[-1].replace("*", "").replace("&", "")
-                
-                fortran_type_param = self.translate_type(param_type)
-                fortran_code += f"  {fortran_type_param}, intent(in) :: {param_name}\n"
-            
-            # Declare return value if not void
-            if fortran_type.lower() != "void":
-                fortran_code += f"  {fortran_type} :: {func_name}_result\n"
-            
-            # Translate function body
-            translated_body = self.translate_function_body_iterative(func_body)
-            fortran_code += translated_body
-            
-            if fortran_type.lower() == "void":
-                fortran_code += f"end subroutine {func_name}\n\n"
-            else:
-                fortran_code += f"end function {func_name}\n\n"
+        # Combine module (if any) and main program.
+        fortran_code = module_code + main_prog
         
         return fortran_code
 
     def translate_type(self, c_type):
         """Translate C type to Fortran type."""
         c_type = c_type.lower()
-        
         if 'int' in c_type:
             return "integer"
         elif 'unsigned' in c_type and ('int' in c_type or 'long' in c_type):
@@ -148,46 +149,35 @@ class CToFortranTranslator:
         """Remove preprocessor directives from C code."""
         lines = c_code.split('\n')
         filtered_lines = []
-        
         for line in lines:
             stripped = line.strip()
             if not stripped.startswith('#'):
                 filtered_lines.append(line)
             else:
-                # Add a comment to preserve information about includes
                 if stripped.startswith('#include'):
                     filtered_lines.append(f"! {stripped}")
-        
         return '\n'.join(filtered_lines)
 
     def extract_functions(self, c_code):
         """Extract function definitions from C code."""
-        # Regular expression to match function definitions
         func_pattern = r'(\w+)\s+(\w+)\s*\((.*?)\)\s*\{((?:[^{}]|(?:\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\}))*)\}'
-        
         functions = {}
         for match in re.finditer(func_pattern, c_code, re.DOTALL):
             return_type = match.group(1)
             func_name = match.group(2)
             params_str = match.group(3).strip()
             body = match.group(4)
-            
-            # Parse parameters
             params = []
             if params_str and params_str.lower() != "void":
                 for param in params_str.split(','):
                     param = param.strip()
                     if param:
                         params.append(param)
-            
-            # Store function info
             self.functions[func_name] = {
                 "return_type": return_type,
                 "params": params
             }
-            
             functions[func_name] = body
-        
         return functions
 
     def collect_declarations(self, c_body):
@@ -197,20 +187,15 @@ class CToFortranTranslator:
         """
         declarations = {}
         c_lines = c_body.split('\n')
-        
         for line in c_lines:
             line = line.strip()
             if self.is_declaration(line):
-                # Extract type and variable name
                 line = line.rstrip(';')
-                
-                # Handle array declarations
                 if '[' in line or '{' in line:
                     array_init = None
                     if '{' in line:
                         array_init = line[line.find('{'):line.rfind('}')+1]
                         line = line[:line.find('{')] + line[line.rfind('}')+1:]
-                    
                     parts = line.split()
                     if len(parts) >= 2:
                         var_type = parts[0]
@@ -223,14 +208,12 @@ class CToFortranTranslator:
                         declaration = parts[0].strip()
                     else:
                         declaration = line
-                    
                     parts = declaration.split()
                     if len(parts) >= 2:
                         var_type = parts[0]
                         var_name = parts[1].strip()
                         declarations[var_name] = (var_type, False, None)
                         self.variable_types[var_name] = (var_type, False)
-        
         return declarations
 
     def collect_for_loop_declarations(self, c_body):
@@ -251,44 +234,36 @@ class CToFortranTranslator:
         line = line.strip()
         if not line or not line.endswith(';'):
             return False
-        
-        return (
-            line.startswith('int ') or 
-            line.startswith('float ') or 
-            line.startswith('double ') or 
-            line.startswith('char ') or
-            line.startswith('long ')
-        )
-    
+        return (line.startswith('int ') or 
+                line.startswith('float ') or 
+                line.startswith('double ') or 
+                line.startswith('char ') or
+                line.startswith('long '))
+
     def translate_for_loop_start(self, init, condition, increment):
         """Translate the start of a C for loop to Fortran."""
-        # Remove any declaration information from the header
         if ' ' in init and '=' in init:
             parts = init.split('=', 1)
             decl_parts = parts[0].strip().split()
             if len(decl_parts) >= 2:
-                # We no longer output the declaration immediately since it is captured in the pre-scan.
                 var_name = decl_parts[1].strip()
                 start_val = parts[1].strip()
                 init = f"{var_name}={start_val}"
-        
         init_parts = init.split('=')
         if len(init_parts) == 2:
             loop_var = init_parts[0].strip()
             start_val = init_parts[1].strip()
         else:
             return self.indent() + f"! Failed to parse for loop: for ({init}; {condition}; {increment})\n"
-        
         cond_parts = re.split(r'<=|<|>=|>|!=|==', condition)
         if len(cond_parts) == 2:
             end_var = cond_parts[1].strip()
-            if '<' in condition and not '<=' in condition:
+            if ('<' in condition) and not ('<=' in condition):
                 end_var = f"{end_var} - 1"
-            elif '>' in condition and not '>=' in condition:
+            elif ('>' in condition) and not ('>=' in condition):
                 end_var = f"{end_var} + 1"
         else:
             return self.indent() + f"! Failed to parse for loop condition: {condition}\n"
-        
         step = "1"
         if '+=' in increment:
             inc_parts = increment.split('+=') 
@@ -310,41 +285,39 @@ class CToFortranTranslator:
             if '-' in inc_parts[1]:
                 sub_parts = inc_parts[1].split('-')
                 step = f"-{sub_parts[1].strip()}"
-        
         fortran_loop = self.indent() + f"do {loop_var} = {start_val}, {end_var}"
         if step != "1":
             fortran_loop += f", {step}"
         fortran_loop += "\n"
-        
         return fortran_loop
-    
+
     def translate_for_loop_end(self):
         """Translate the end of a C for loop to Fortran."""
         return self.indent() + "end do\n"
-    
+
     def translate_while_loop_start(self, condition):
         """Translate the start of a C while loop to Fortran."""
         fortran_condition = self.translate_expression(condition)
         return self.indent() + "do while (" + fortran_condition + ")\n"
-    
+
     def translate_while_loop_end(self):
         """Translate the end of a C while loop to Fortran."""
         return self.indent() + "end do\n"
-    
+
     def translate_if_start(self, condition):
         """Translate the start of a C if statement to Fortran."""
         fortran_condition = self.translate_expression(condition)
         return self.indent() + "if (" + fortran_condition + ") then\n"
-    
+
     def translate_if_end(self):
         """Translate the end of a C if statement to Fortran."""
         return self.indent() + "end if\n"
-    
+
     def translate_else_if(self, condition):
         """Translate a C else if statement to Fortran."""
         fortran_condition = self.translate_expression(condition)
         return self.indent() + "else if (" + fortran_condition + ") then\n"
-    
+
     def translate_else(self):
         """Translate a C else statement to Fortran."""
         return self.indent() + "else\n"
@@ -359,14 +332,11 @@ class CToFortranTranslator:
         else:
             declaration = c_declaration
             value = None
-        
         parts = declaration.split()
         if len(parts) < 2:
             return self.indent() + f"! Failed to parse declaration: {c_declaration}\n"
-        
         c_type = parts[0]
         var_name = parts[1]
-        
         if '[' in var_name or (value and '{' in value):
             var_name = var_name.split('[')[0].strip()
             self.variables.add(var_name)
@@ -384,7 +354,6 @@ class CToFortranTranslator:
             fortran_decl = self.indent() + f"{fortran_type} :: {var_name}"
             if value:
                 fortran_decl += f" = {self.translate_expression(value)}"
-        
         return fortran_decl + "\n"
 
     def translate_printf(self, c_printf):
@@ -393,10 +362,8 @@ class CToFortranTranslator:
         printf_match = re.match(r'printf\s*\(\s*"(.*?)"\s*(,\s*(.*))?\s*\)', c_printf)
         if not printf_match:
             return self.indent() + f"! Failed to parse printf: {c_printf}\n"
-        
         args = printf_match.group(3) if printf_match.group(3) else ""
         fortran_print = self.indent() + "print*,"
-        
         if args:
             arg_list = args.split(',')
             translated_args = [self.translate_expression(arg.strip()) for arg in arg_list]
@@ -407,16 +374,14 @@ class CToFortranTranslator:
                 fortran_print += " " + f'"{literal}"'
             else:
                 fortran_print += " "
-        
         return fortran_print + "\n"
-    
+
     def translate_scanf(self, c_scanf):
         """Translate a C scanf statement to Fortran read statement."""
         c_scanf = c_scanf.rstrip(';')
         scanf_match = re.match(r'scanf\s*\(\s*"([^"]*)"\s*(,\s*(.*))?\s*\)', c_scanf)
         if not scanf_match:
             return self.indent() + f"! Failed to parse scanf: {c_scanf}\n"
-        
         format_str = scanf_match.group(1)
         args = scanf_match.group(3) if scanf_match.group(3) else ""
         var_list = []
@@ -427,16 +392,14 @@ class CToFortranTranslator:
                     var_list.append(arg[1:])
                 else:
                     var_list.append(arg)
-        
         fortran_read = self.indent() + "read(*, *"
         fortran_read += ", iostat=result) "
         fortran_read += ", ".join(var_list)
         fortran_read += "\n" + self.indent() + "if (result /= 0) then\n"
         fortran_read += self.indent() + "  ! Handle read error\n"
         fortran_read += self.indent() + "end if\n"
-        
         return fortran_read
-    
+
     def get_var_type(self, var_name):
         """Get the type of a variable if it's known."""
         if var_name in self.variable_types:
@@ -447,22 +410,18 @@ class CToFortranTranslator:
         """Translate a C expression to Fortran using string replacements."""
         if not c_expr:
             return c_expr
-            
         fortran_expr = c_expr
         fortran_expr = fortran_expr.replace('INT_MAX', 'huge(0)')
         fortran_expr = fortran_expr.replace('INT_MIN', '-huge(0)')
         fortran_expr = fortran_expr.replace('LONG_MAX', 'huge(0)')
         fortran_expr = fortran_expr.replace('NULL', 'null()')
-        
         if '[' in fortran_expr and ']' in fortran_expr:
             array_pattern = r'(\w+)\s*\[([^]]+)\]'
             while re.search(array_pattern, fortran_expr):
                 fortran_expr = re.sub(array_pattern, r'\1(\2+1)', fortran_expr)
-        
         if '{' in fortran_expr and '}' in fortran_expr:
             array_init_pattern = r'\{([^{}]*)\}'
             fortran_expr = re.sub(array_init_pattern, r'[\1]', fortran_expr)
-        
         fortran_expr = fortran_expr.replace('==', ' == ')
         fortran_expr = fortran_expr.replace('!=', ' /= ')
         fortran_expr = fortran_expr.replace('>=', ' >= ')
@@ -471,29 +430,22 @@ class CToFortranTranslator:
         fortran_expr = fortran_expr.replace('<', ' < ')
         fortran_expr = fortran_expr.replace('&&', ' .and. ')
         fortran_expr = fortran_expr.replace('||', ' .or. ')
-        
         if fortran_expr.strip().startswith('!'):
             fortran_expr = '.not.' + fortran_expr.strip()[1:]
-        
         sizeof_pattern = r'sizeof\s*\(\s*(\w+)\s*\)'
         if re.search(sizeof_pattern, fortran_expr):
             fortran_expr = re.sub(sizeof_pattern, r'kind(0)', fortran_expr)
-        
         return fortran_expr
 
     def translate_function_body_iterative(self, c_body, is_main=False):
         """
-        Translate C function body to Fortran. This version performs a pre-scan of the
-        entire function body for declarations (both regular ones and for-loop headers)
-        and outputs all of them before any executable statements.
+        Translate C function body to Fortran using an iterative approach.
+        All variable declarations (including those from for-loop headers) are output
+        before any executable statements.
         """
         fortran_body = ""
-        
-        # Collect normal declarations.
         body_decls = self.collect_declarations(c_body)
-        # Also collect for-loop declarations from the entire body.
         loop_decls = self.collect_for_loop_declarations(c_body)
-        # Merge declarations (for-loop declarations take precedence if not already declared).
         all_decls = {}
         for var_name, decl in loop_decls.items():
             all_decls[var_name] = decl
@@ -509,17 +461,11 @@ class CToFortranTranslator:
             else:
                 decl_str = f"{self.translate_type(var_type)} :: {var_name}"
             all_decls[var_name] = decl_str
-        
-        # Output all declarations at the top.
         for decl in all_decls.values():
             fortran_body += self.indent() + decl + "\n"
-        
-        # Add required I/O variable if needed.
         if "scanf" in c_body:
             fortran_body += self.indent() + "integer :: result  ! For I/O status\n"
         fortran_body += "\n"
-        
-        # Process executable statements.
         c_lines = c_body.split('\n')
         i = 0
         block_stack = []
@@ -709,6 +655,4 @@ class CToFortranTranslator:
                 continue
             fortran_body += self.indent() + f"! Untranslated: {line}\n"
             i += 1
-
-        fortran_body = remove_newlines_in_quotes(fortran_body)
         return fortran_body
