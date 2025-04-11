@@ -333,17 +333,23 @@ class CToFortranTranslator:
             if value and '{' in value:
                 elements = re.search(r'\{(.*?)\}', value).group(1)
                 elements = [e.strip() for e in elements.split(',')]
-                size = len(elements)
-                fortran_decl = self.indent() + f"{fortran_type}, dimension({size}) :: {var_name} = [{', '.join(elements)}]"
+                decl_line = f"{fortran_type}, dimension({len(elements)}) :: {var_name}"
+                assign_line = f"{var_name} = [{', '.join(elements)}]"
             else:
-                fortran_decl = self.indent() + f"{fortran_type}, dimension(:) :: {var_name}"
+                decl_line = f"{fortran_type}, dimension(:) :: {var_name}"
+                assign_line = ""
         else:
             self.variables.add(var_name)
             fortran_type = self.translate_type(c_type)
-            fortran_decl = self.indent() + f"{fortran_type} :: {var_name}"
+            decl_line = f"{fortran_type} :: {var_name}"
             if value:
-                fortran_decl += f" = {self.translate_expression(value)}"
-        return fortran_decl + "\n"
+                assign_line = f"{var_name} = {self.translate_expression(value)}"
+            else:
+                assign_line = ""
+        result = self.indent() + decl_line + "\n"
+        if assign_line:
+            result += self.indent() + assign_line + "\n"
+        return result
 
     def translate_printf(self, c_printf):
         """Translate a C printf statement to Fortran using list-directed formatting."""
@@ -426,30 +432,40 @@ class CToFortranTranslator:
             fortran_expr = re.sub(sizeof_pattern, r'kind(0)', fortran_expr)
         return fortran_expr
 
+    def translate_updating_operator(self, c_line):
+        """
+        Translate a C updating operator (e.g. a *= b) into a Fortran assignment:
+        a *= b  ->  a = a * b
+        (handles +=, -=, *=, and /=)
+        """
+        match = re.match(r'(\w+)\s*([\+\-\*/])=\s*(.+)', c_line)
+        if match:
+            var = match.group(1)
+            op = match.group(2)
+            expr = match.group(3).strip()
+            return f"{var} = {var} {op} {expr}"
+        return None
+
     def translate_function_body_iterative(self, c_body, is_main=False):
         """
         Translate C function body to Fortran using an iterative approach.
         All variable declarations (including those from for-loop headers) are output
-        before any executable statements. For non-array variables, if an initialization
-        is provided, a separate assignment statement is generated after the declarations.
+        before any executable statements. For non-array variables with an initialization,
+        a separate assignment is generated. Updating operators (like a += b) are translated.
         """
         fortran_body = ""
-        body_decls = self.collect_declarations(c_body)  # mapping: var -> (c_type, is_array, init)
-        loop_decls = self.collect_for_loop_declarations(c_body)  # mapping: var -> fortran decl line
-        # Build a mapping: var -> (decl_line, assign_line)
+        body_decls = self.collect_declarations(c_body)
+        loop_decls = self.collect_for_loop_declarations(c_body)
         all_decls = {}
-        # Add loop-declarations first (assume no initialization here)
         for var_name, decl in loop_decls.items():
             all_decls[var_name] = (decl, "")
-        # Process declarations from function body.
         for var_name, (var_type, is_array, init) in body_decls.items():
             fortran_type = self.translate_type(var_type)
             if is_array:
                 if init:
                     elements = re.search(r'\{(.*?)\}', init).group(1)
                     elements = [e.strip() for e in elements.split(',')]
-                    size = len(elements)
-                    decl_line = f"{fortran_type}, dimension({size}) :: {var_name}"
+                    decl_line = f"{fortran_type}, dimension({len(elements)}) :: {var_name}"
                     assign_line = f"{var_name} = [{', '.join(elements)}]"
                 else:
                     decl_line = f"{fortran_type}, dimension(:) :: {var_name}"
@@ -461,17 +477,16 @@ class CToFortranTranslator:
                 else:
                     assign_line = ""
             all_decls[var_name] = (decl_line, assign_line)
-        # Output the declaration block.
+        # Output all declarations first.
         for decl_line, _ in all_decls.values():
             fortran_body += self.indent() + decl_line + "\n"
-        # Then output the assignment block.
+        # Then output assignment statements.
         for _, assign_line in all_decls.values():
             if assign_line:
                 fortran_body += self.indent() + assign_line + "\n"
         if "scanf" in c_body:
             fortran_body += self.indent() + "integer :: result  ! For I/O status\n"
         fortran_body += "\n"
-        # Process the executable statements.
         c_lines = c_body.split('\n')
         i = 0
         block_stack = []
@@ -483,8 +498,16 @@ class CToFortranTranslator:
             if self.is_declaration(line):
                 i += 1
                 continue
+            # Remove inline comments and work on the code portion.
+            line_no_comment = line.split('//')[0].strip()
+            if line_no_comment.endswith(';'):
+                line_code = line_no_comment.rstrip(';').strip()
+                updated = self.translate_updating_operator(line_code)
+                if updated is not None:
+                    fortran_body += self.indent() + updated + "\n"
+                    i += 1
+                    continue
             if line.startswith('return'):
-                # Skip return statements in main.
                 i += 1
                 continue
             if line.startswith('if') and '(' in line and ')' in line:
