@@ -104,10 +104,9 @@ int main() {
 gives invalid Fortran code:
 
 ```fortran
-! Translated from C to Fortran
 program main
-  implicit none
-
+implicit none
+integer :: i
 integer, dimension(7) :: test_cases = [0, 1, 5, 10, 12, 20, -1]
 integer, dimension(:) :: num_tests
 integer, dimension(:) :: n
@@ -115,28 +114,24 @@ integer :: result
 integer :: num
 integer :: result  ! For I/O status
 
-print *, "Factorial Test Program"
-print *, "====================="
-integer :: i
+print*, "Factorial Test Program"
+print*, "====================="
 do i = 0, num_tests - 1
-  write(*, '(A)', advance='no') "factorial((I0)) = "
-  write(*, '(A)', advance='no') n
+  print*, n
   if (result  >  0  .or.  n  ==  0) then
-    print *, "I0", result
+    print*, result
   end if
 end do
 ! Interactive test
-print *, "Enter a number to compute its factorial (or -1 to quit): "
+print*, "Enter a number to compute its factorial (or -1 to quit): "
 do while (scanf("%d", &num)  ==  1  .and.  num  /=  -1)
-  write(*, '(A)', advance='no') "factorial((I0)) = "
-  write(*, '(A)', advance='no') num
+  print*, num
   unsigned long long result = factorial(num)
   if (result  >  0  .or.  num  ==  0) then
-    print *, "%llu", result
+    print*, result
   end if
-  print *, "Enter a number to compute its factorial (or -1 to quit): "
+  print*, "Enter a number to compute its factorial (or -1 to quit): "
 end do
-! Return 0 (ignored in main)
 
 end program main
 
@@ -144,6 +139,7 @@ function factorial(n) result(factorial_result)
   implicit none
   integer, intent(in) :: n
   integer :: factorial_result
+integer :: i
 integer :: result
 
 ! Base case: factorial of 0 is 1
@@ -151,15 +147,14 @@ if (n  ==  0) then
   factorial_result = 1
   ! Handle negative input
   if (n  <  0) then
-    print *, "Error: Factorial not defined for negative numbers"
+    print*, "Error: Factorial not defined for negative numbers"
     factorial_result = 0
   end if
   ! Compute factorial using iteration
-  integer :: i
   do i = 1, n
     ! Check for overflow (simplified for int type)
     if (result  >  huge(0) / i) then
-      print *, "Error: Factorial overflow"
+      print*, "Error: Factorial overflow"
       factorial_result = 0
     end if
     result * = i
