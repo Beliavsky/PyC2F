@@ -123,17 +123,17 @@ class CToFortranTranslator:
         if 'int' in c_type:
             return "integer"
         elif 'unsigned' in c_type and ('int' in c_type or 'long' in c_type):
-            return "integer" # Fortran doesn't have unsigned types
+            return "integer"  # Fortran doesn't have unsigned types
         elif 'long' in c_type and 'long' in c_type:
-            return "integer(kind=8)" # long long is 64-bit
+            return "integer(kind=8)"  # long long is 64-bit
         elif 'long' in c_type:
-            return "integer(kind=4)" # long is typically 32-bit
+            return "integer(kind=4)"  # long is typically 32-bit
         elif 'float' in c_type:
             return "real"
         elif 'double' in c_type:
-            return "double precision" # or real(kind=8)
+            return "double precision"  # or real(kind=8)
         elif 'char' in c_type and '*' in c_type:
-            return "character(len=100)" # Arbitrary length - can be adjusted
+            return "character(len=100)"  # Arbitrary length - can be adjusted
         elif 'char' in c_type:
             return "character"
         elif 'bool' in c_type:
@@ -316,7 +316,7 @@ class CToFortranTranslator:
         # Parse increment
         step = "1"
         if '+=' in increment:
-            inc_parts = increment.split('+=')
+            inc_parts = increment.split('+=') 
             step = inc_parts[1].strip()
         elif '-=' in increment:
             inc_parts = increment.split('-=')
@@ -458,7 +458,7 @@ class CToFortranTranslator:
         return fortran_decl + "\n"
 
     def translate_printf(self, c_printf):
-        """Translate a C printf statement to Fortran."""
+        """Translate a C printf statement to Fortran using list-directed formatting."""
         # Remove semicolon
         c_printf = c_printf.rstrip(';')
         
@@ -467,78 +467,24 @@ class CToFortranTranslator:
         if not printf_match:
             return self.indent() + f"! Failed to parse printf: {c_printf}\n"
         
-        format_str = printf_match.group(1)
+        # In this simplified translation we ignore the format string
         args = printf_match.group(3) if printf_match.group(3) else ""
+        fortran_print = self.indent() + "print*,"
         
-        # Check if we need to use write instead of print
-        if '%' in format_str and not format_str.endswith('\\n'):
-            # Need to use write with advance='no'
-            return self.translate_printf_to_write(format_str, args)
-        
-        # Replace C format specifiers with Fortran ones
-        format_str = format_str.replace('%d', 'I0').replace('%f', 'F0.6').replace('%s', 'A')
-        format_str = format_str.replace('\\n', '')  # Remove newlines for print *
-        
-        # Build Fortran print statement
-        fortran_print = self.indent() + "print *, "
-        
-        # Add arguments
         if args:
             arg_list = args.split(',')
             translated_args = [self.translate_expression(arg.strip()) for arg in arg_list]
-            
-            if format_str.strip():
-                fortran_print += f'"{format_str}", '
-            
-            fortran_print += ", ".join(translated_args)
+            fortran_print += " " + ", ".join(translated_args)
         else:
-            # Just a string without arguments
-            fortran_print += f'"{format_str}"'
+            # If no arguments, output the literal from the format string if any
+            literal = printf_match.group(1)
+            if literal:
+                fortran_print += " " + f'"{literal}"'
+            else:
+                fortran_print += " "
         
         return fortran_print + "\n"
-        
-    def translate_printf_to_write(self, format_str, args):
-        """Translate a C printf to Fortran write statement for more control."""
-        # Detect if we should advance or not
-        advance = 'yes' if format_str.endswith('\\n') else 'no'
-        
-        # Remove trailing newline for formatting
-        if advance == 'yes':
-            format_str = format_str[:-2]  # Remove \n
-        
-        # Replace C format specifiers with Fortran ones
-        # More comprehensive than the simple print version
-        format_str = format_str.replace('%d', '(I0)').replace('%i', '(I0)')
-        format_str = format_str.replace('%f', '(F0.6)').replace('%g', '(G0.6)')
-        format_str = format_str.replace('%s', '(A)').replace('%c', '(A1)')
-        format_str = format_str.replace('\\n', '')  # Remove any remaining newlines
-        format_str = format_str.replace('\\t', '    ')  # Replace tabs with spaces
-        
-        # Build Fortran write statement
-        fortran_write = self.indent() + f'write(*, \'(A)\', advance=\'{advance}\') "'
-        
-        # If there are args, we'll need to format them properly
-        if args:
-            arg_list = args.split(',')
-            translated_args = [self.translate_expression(arg.strip()) for arg in arg_list]
-            
-            # Simple case - direct replacement
-            if len(translated_args) == 1 and format_str.count('%') == 1:
-                fortran_write = self.indent() + f'write(*, \'(A)\', advance=\'{advance}\') "{format_str}"'
-                fortran_write = fortran_write.replace('(A)', '(I0)' if 'integer' in self.get_var_type(translated_args[0]) else '(A)')
-                return fortran_write + "\n"
-            
-            # More complex case - multiple args or complex format
-            fortran_write = self.indent() + f'write(*, \'(A)\', advance=\'{advance}\') "{format_str}"\n'
-            for arg in translated_args:
-                fortran_write += self.indent() + f'write(*, \'(A)\', advance=\'{advance}\') {arg}\n'
-            
-            return fortran_write
-        else:
-            # Just a string without arguments
-            fortran_write += format_str + '"\n'
-            return fortran_write
-            
+    
     def translate_scanf(self, c_scanf):
         """Translate a C scanf statement to Fortran read statement."""
         # Remove semicolon
