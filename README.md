@@ -16,20 +16,17 @@ int main() {
 }
 ```
 
-gives a Fortran code that compiles but has an extraneous "I0":
+gives a Fortran code
 
-```fortran
-! Translated from C to Fortran
+```Fortran
 program main
-  implicit none
-
+implicit none
 integer :: i
 integer :: j
 
 i = 2
 j = 3
-print *, "I0", i + j
-! Return 0 (ignored in main)
+print*, i, j, i + j
 
 end program main
 ```
