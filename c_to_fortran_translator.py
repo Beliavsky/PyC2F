@@ -1,4 +1,5 @@
-from util import remove_newlines_in_quotes, get_before_inc_dec
+from util import (remove_newlines_in_quotes, get_before_inc_dec,
+    remove_blank_lines)
 
 #!/usr/bin/env python3
 """
@@ -21,16 +22,18 @@ class CToFortranTranslator:
         """Return the current indentation string."""
         return self.indent_str * self.indent_level
 
-    def translate_file(self, input_file, output_file):
+    def translate_file(self, input_file, output_file,
+        blank_lines_allowed = True):
         """Translate a C file to Fortran."""
+        
         try:
             with open(input_file, 'r') as f:
-                c_code = f.read()
-            
+                c_code = f.read()        
             fortran_code = self.translate_code(c_code)
-            
             with open(output_file, 'w') as f:
-                f.write(fortran_code)
+                for line in fortran_code.splitlines():
+                    if blank_lines_allowed or line.strip() != "":
+                        f.write(line + '\n')
                 
             print(f"Translation complete. Output written to {output_file}")
             return True
@@ -55,7 +58,7 @@ class CToFortranTranslator:
         used_function_names = []
         if non_main_funcs:
             module_code += "module m_mod\n"
-            module_code += "  implicit none\n"
+            module_code += "implicit none\n"
             module_code += "contains\n\n"
             for func_name, func_body in non_main_funcs.items():
                 self.current_function = func_name
@@ -76,7 +79,7 @@ class CToFortranTranslator:
                     module_code += ")\n"
                 else:
                     module_code += f") result({func_name}_result)\n"
-                module_code += "  implicit none\n"
+                module_code += "implicit none\n"
                 for param in params:
                     param_parts = param.split()
                     param_type = " ".join(param_parts[:-1])
@@ -98,7 +101,7 @@ class CToFortranTranslator:
         main_prog += "program main\n"
         if used_function_names:
             main_prog += "use m_mod, only: " + ", ".join(used_function_names) + "\n"
-        main_prog += "  implicit none\n\n"
+        main_prog += "implicit none\n\n"
         if main_body:
             self.current_function = "main"
             translated_main = self.translate_function_body_iterative(main_body, is_main=True)
@@ -668,7 +671,6 @@ class CToFortranTranslator:
             if xop == "++" or xop == "--":
                 fortran_line = var_name + " = " + var_name + " " + xop[0] + " 1"
                 fortran_body += self.indent() + fortran_line + "\n"
-#            fortran_body += self.indent() + f"! foobar Untranslated: {line}\n"
             i += 1
         # Flush any remaining open blocks.
         while block_stack:
