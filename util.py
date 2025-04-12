@@ -25,3 +25,35 @@ def remove_newlines_in_quotes(text):
             result.append(text[i])
             i += 1
     return ''.join(result)
+
+def get_before_inc_dec(line):
+    """Extracts the substring before '++' or '--' and identifies the operator.
+    
+    Args:
+        line (str): Input string to process.
+        
+    Returns:
+        tuple: (substring before '++' or '--' or '', operator '++', '--', or '').
+    """
+    pos_plus = line.find('++')
+    pos_minus = line.find('--')
+    
+    if pos_plus == -1 and pos_minus == -1:
+        return ("", "")
+    
+    if pos_plus != -1 and (pos_minus == -1 or pos_plus < pos_minus):
+        return (line[:pos_plus].strip(), "++")
+    else:
+        return (line[:pos_minus].strip(), "--")
+
+def remove_blank_lines(text):
+    """Remove blank lines from a multiline string.
+    
+    Args:
+        text (str): Input multiline string.
+        
+    Returns:
+        str: String with blank lines removed.
+    """
+    return '\n'.join(line for line in text.splitlines() if line.strip())
+    
