@@ -1,6 +1,5 @@
-from util import remove_newlines_in_quotes
-
 #!/usr/bin/env python3
+from util import remove_newlines_in_quotes
 """
 Main translator class for converting C code to Fortran.
 """
@@ -26,12 +25,9 @@ class CToFortranTranslator:
         try:
             with open(input_file, 'r') as f:
                 c_code = f.read()
-            
             fortran_code = self.translate_code(c_code)
-            
             with open(output_file, 'w') as f:
                 f.write(fortran_code)
-                
             print(f"Translation complete. Output written to {output_file}")
             return True
         except Exception as e:
@@ -42,7 +38,6 @@ class CToFortranTranslator:
         """Translate C code to Fortran with non-main functions in a module."""
         c_code = self.remove_preprocessor_directives(c_code)
         c_functions = self.extract_functions(c_code)
-        
         main_body = None
         non_main_funcs = {}
         for func_name, body in c_functions.items():
@@ -50,7 +45,7 @@ class CToFortranTranslator:
                 main_body = body
             else:
                 non_main_funcs[func_name] = body
-        
+
         module_code = ""
         used_function_names = []
         if non_main_funcs:
@@ -93,7 +88,7 @@ class CToFortranTranslator:
                     module_code += f"end function {func_name}\n\n"
                 used_function_names.append(func_name)
             module_code += "end module m_mod\n\n"
-        
+
         main_prog = ""
         main_prog += "program main\n"
         if used_function_names:
@@ -106,7 +101,6 @@ class CToFortranTranslator:
         else:
             main_prog += "  ! No main function found\n"
         main_prog += "\nend program main\n\n"
-        
         fortran_code = module_code + main_prog
         return fortran_code
 
@@ -116,17 +110,17 @@ class CToFortranTranslator:
         if 'int' in c_type:
             return "integer"
         elif 'unsigned' in c_type and ('int' in c_type or 'long' in c_type):
-            return "integer"  # Fortran doesn't have unsigned types
+            return "integer"
         elif 'long' in c_type and 'long' in c_type:
-            return "integer(kind=8)"  # long long is 64-bit
+            return "integer(kind=8)"
         elif 'long' in c_type:
-            return "integer(kind=4)"  # long is typically 32-bit
+            return "integer(kind=4)"
         elif 'float' in c_type:
             return "real"
         elif 'double' in c_type:
-            return "double precision"  # or real(kind=8)
+            return "double precision"
         elif 'char' in c_type and '*' in c_type:
-            return "character(len=100)"  # Arbitrary length
+            return "character(len=100)"
         elif 'char' in c_type:
             return "character"
         elif 'bool' in c_type:
@@ -433,18 +427,32 @@ class CToFortranTranslator:
 
     def translate_updating_operator(self, c_line):
         """
-        Translate a C updating operator (e.g. a *= b) into a Fortran assignment:
-        a += b  ->  a = a + b,
-        a -= b  ->  a = a - b,
-        a *= b  ->  a = a * b,
-        a /= b  ->  a = a / b
+        Translate a C updating operator into Fortran.
+        Examples:
+          a += b   ->   a = a + b
+          a -= b   ->   a = a - b
+          a *= b   ->   a = a * b
+          a /= b   ->   a = a / b
+          n++      ->   n = n + 1
+          n--      ->   n = n - 1
         """
+        # Check for compound assignment first.
         match = re.match(r'(\w+)\s*([\+\-\*/])=\s*(.+)', c_line)
         if match:
             var = match.group(1)
             op = match.group(2)
             expr = match.group(3).strip()
             return f"{var} = {var} {op} {expr}"
+        # Check for postfix increment.
+        match_inc = re.match(r'(\w+)\s*\+\+', c_line)
+        if match_inc:
+            var = match_inc.group(1)
+            return f"{var} = {var} + 1"
+        # Check for postfix decrement.
+        match_dec = re.match(r'(\w+)\s*\-\-', c_line)
+        if match_dec:
+            var = match_dec.group(1)
+            return f"{var} = {var} - 1"
         return None
 
     def translate_function_body_iterative(self, c_body, is_main=False):
@@ -452,9 +460,9 @@ class CToFortranTranslator:
         Translate C function body to Fortran using an iterative approach.
         All variable declarations (including those from for-loop headers) are output
         before any executable statements. For non-array variables with an initialization,
-        a separate assignment is generated. Updating operators (like a += b) are translated.
-        In non-main functions, return statements are converted into an assignment to the result variable.
-        At the end of processing the function body, any remaining open block is flushed.
+        a separate assignment is generated. Updating operators (like a += b, n--, n++)
+        are translated appropriately. In non-main functions, return statements are converted
+        into an assignment to the result variable. Any remaining open blocks are closed.
         """
         fortran_body = ""
         body_decls = self.collect_declarations(c_body)
@@ -483,12 +491,13 @@ class CToFortranTranslator:
         # Output declarations.
         for decl_line, _ in all_decls.values():
             fortran_body += self.indent() + decl_line + "\n"
-        # Then output assignments.
+        # Output I/O declaration if scanf is present, before assignments.
+        if "scanf" in c_body:
+            fortran_body += self.indent() + "integer :: result  ! For I/O status\n"
+        # Then output assignment statements.
         for _, assign_line in all_decls.values():
             if assign_line:
                 fortran_body += self.indent() + assign_line + "\n"
-        if "scanf" in c_body:
-            fortran_body += self.indent() + "integer :: result  ! For I/O status\n"
         fortran_body += "\n"
         c_lines = c_body.split('\n')
         i = 0
@@ -501,7 +510,7 @@ class CToFortranTranslator:
             if self.is_declaration(line):
                 i += 1
                 continue
-            # Remove inline comments before processing.
+            # Remove inline comments.
             line_no_comment = line.split('//')[0].strip()
             if line_no_comment.endswith(';'):
                 line_code = line_no_comment.rstrip(';').strip()
@@ -665,7 +674,6 @@ class CToFortranTranslator:
                 continue
             fortran_body += self.indent() + f"! Untranslated: {line}\n"
             i += 1
-        # Flush any remaining open blocks.
         while block_stack:
             block_type, old_indent = block_stack.pop()
             self.indent_level = old_indent
