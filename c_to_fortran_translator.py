@@ -1,5 +1,5 @@
 from util import (remove_newlines_in_quotes, get_before_inc_dec,
-    remove_blank_lines)
+    remove_blank_lines, move_declarations_to_top)
 
 #!/usr/bin/env python3
 """
@@ -23,13 +23,15 @@ class CToFortranTranslator:
         return self.indent_str * self.indent_level
 
     def translate_file(self, input_file, output_file,
-        blank_lines_allowed = True):
+        blank_lines_allowed=True, move_dec=False):
         """Translate a C file to Fortran."""
         
         try:
             with open(input_file, 'r') as f:
                 c_code = f.read()        
             fortran_code = self.translate_code(c_code)
+            if move_dec:
+                fortran_code = move_declarations_to_top(fortran_code)
             with open(output_file, 'w') as f:
                 for line in fortran_code.splitlines():
                     if blank_lines_allowed or line.strip() != "":
