@@ -1,5 +1,6 @@
 # PyC2F
-Attempt to write a partial translator from C to Fortran in Python. Currently not working. Running
+Attempt to write a partial translator from C to Fortran in Python. Works for only a few simple programs.
+Running
 
 `python main.py xij.c xij.f90` for the C code `xij.c`
 
@@ -35,6 +36,77 @@ Running it on the C code
 
 ```c
 #include <stdio.h>
+
+int main() {
+	printf("Number Square Cube\n");
+	for (int i = 1; i <= 10; i++) {
+		printf("%d\t%d\t%d\n", i, i * i, i * i * i);
+	}
+	return 0;
+}
+```
+
+gives
+
+```fortran
+program main
+  implicit none
+
+integer :: i
+
+print*, "Number Square Cube"
+do i = 1, 10
+  print*, i, i * i, i * i * i
+end do
+
+end program main
+```
+
+Running on
+```c
+#include <stdio.h>
+
+int main() {
+	int a = 10, b = 5;
+	printf("a, b = %d %d \n", a, b);
+	a += b;  // a becomes 15
+	printf("After a += b: a = %d\n", a);
+	a -= 3;  // a becomes 12
+	printf("After a -= 3: a = %d\n", a);
+	a *= 2;  // a becomes 24
+	printf("After a *= 2: a = %d\n", a);
+	a /= 4;  // a becomes 6
+	printf("After a /= 4: a = %d\n", a);
+
+	return 0;
+}
+```
+gives
+```fortran
+program main
+  implicit none
+
+integer :: a
+integer :: b
+a = 10
+b = 5
+
+print*, a, b
+a = a + b
+print*, a
+a = a - 3
+print*, a
+a = a * 2
+print*, a
+a = a / 4
+print*, a
+
+end program main
+```
+
+Running on
+```c
+#include <stdio.h>
 #include <limits.h>
 
 // Function to compute factorial of an integer
@@ -42,15 +114,12 @@ int factorial(int n) {
     // Base case: factorial of 0 is 1
 	if (n == 0)
 		return 1;
-
     // Handle negative input
 	if (n < 0) {
 		printf("Error: Factorial not defined for negative numbers\n");
 		return 0;
 	}
-
 	int result = 1;
-
     // Compute factorial using iteration
 	for (int i = 1; i <= n; i++) {
 	// Check for overflow (simplified for int type)
@@ -60,80 +129,20 @@ int factorial(int n) {
 		}
 		result *= i;
 	}
-
 	return result;
 }
 
 int main() {
-	int test_cases[] = {0, 1, 5, 10, 12, 20, -1};
-	int num_tests = sizeof(test_cases) / sizeof(test_cases[0]);
-
-	printf("Factorial Test Program\n");
-	printf("=====================\n\n");
-
-	for (int i = 0; i < num_tests; i++) {
-		int n = test_cases[i];
-		printf("factorial(%d) = ", n);
-
-		int result = factorial(n);
-
-		if (result > 0 || n == 0) {
-			printf("%d\n", result);
-		}
-	}
-
-    // Interactive test
-	int num;
-	printf("\nEnter a number to compute its factorial (or -1 to quit): ");
-	while (scanf("%d", &num) == 1 && num != -1) {
-		printf("factorial(%d) = ", num);
-
-		unsigned long long result = factorial(num);
-
-		if (result > 0 || num == 0) {
-			printf("%llu\n", result);
-		}
-
-		printf("Enter a number to compute its factorial (or -1 to quit): ");
-	}
-
+	printf("factorial(3) = %d", factorial(3));
 	return 0;
 }
 ```
 
-gives invalid Fortran code:
-
+gives an incorrect Fortran code where the case n /= 0 is not handled in the function
 ```fortran
-program main
-implicit none
-integer :: i
-integer, dimension(7) :: test_cases = [0, 1, 5, 10, 12, 20, -1]
-integer, dimension(:) :: num_tests
-integer, dimension(:) :: n
-integer :: result
-integer :: num
-integer :: result  ! For I/O status
-
-print*, "Factorial Test Program"
-print*, "====================="
-do i = 0, num_tests - 1
-  print*, n
-  if (result  >  0  .or.  n  ==  0) then
-    print*, result
-  end if
-end do
-! Interactive test
-print*, "Enter a number to compute its factorial (or -1 to quit): "
-do while (scanf("%d", &num)  ==  1  .and.  num  /=  -1)
-  print*, num
-  unsigned long long result = factorial(num)
-  if (result  >  0  .or.  num  ==  0) then
-    print*, result
-  end if
-  print*, "Enter a number to compute its factorial (or -1 to quit): "
-end do
-
-end program main
+module m_mod
+  implicit none
+contains
 
 function factorial(n) result(factorial_result)
   implicit none
@@ -141,6 +150,7 @@ function factorial(n) result(factorial_result)
   integer :: factorial_result
 integer :: i
 integer :: result
+result = 1
 
 ! Base case: factorial of 0 is 1
 if (n  ==  0) then
@@ -157,8 +167,20 @@ if (n  ==  0) then
       print*, "Error: Factorial overflow"
       factorial_result = 0
     end if
-    result * = i
+    result = result * i
   end do
   factorial_result = result
+end if
 end function factorial
+
+end module m_mod
+
+program main
+use m_mod, only: factorial
+  implicit none
+
+
+print*, factorial(3)
+
+end program main
 ```
