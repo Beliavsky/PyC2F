@@ -1,4 +1,4 @@
-from util import remove_newlines_in_quotes
+from util import remove_newlines_in_quotes, get_before_inc_dec
 
 #!/usr/bin/env python3
 """
@@ -663,7 +663,12 @@ class CToFortranTranslator:
                 fortran_body += self.indent() + f"! {comment}\n"
                 i += 1
                 continue
-            fortran_body += self.indent() + f"! Untranslated: {line}\n"
+            print("line:", line) # debug
+            var_name, xop = get_before_inc_dec(line)
+            if xop == "++" or xop == "--":
+                fortran_line = var_name + " = " + var_name + " " + xop[0] + " 1"
+                fortran_body += self.indent() + fortran_line + "\n"
+#            fortran_body += self.indent() + f"! foobar Untranslated: {line}\n"
             i += 1
         # Flush any remaining open blocks.
         while block_stack:
