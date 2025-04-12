@@ -114,17 +114,17 @@ class CToFortranTranslator:
         if 'int' in c_type:
             return "integer"
         elif 'unsigned' in c_type and ('int' in c_type or 'long' in c_type):
-            return "integer"
+            return "integer"  # Fortran doesn't have unsigned types
         elif 'long' in c_type and 'long' in c_type:
-            return "integer(kind=8)"
+            return "integer(kind=8)"  # long long is 64-bit
         elif 'long' in c_type:
-            return "integer(kind=4)"
+            return "integer(kind=4)"  # long is typically 32-bit
         elif 'float' in c_type:
             return "real"
         elif 'double' in c_type:
-            return "double precision"
+            return "double precision"  # or real(kind=8)
         elif 'char' in c_type and '*' in c_type:
-            return "character(len=100)"
+            return "character(len=100)"  # Arbitrary length
         elif 'char' in c_type:
             return "character"
         elif 'bool' in c_type:
@@ -162,10 +162,7 @@ class CToFortranTranslator:
                     param = param.strip()
                     if param:
                         params.append(param)
-            self.functions[func_name] = {
-                "return_type": return_type,
-                "params": params
-            }
+            self.functions[func_name] = {"return_type": return_type, "params": params}
             functions[func_name] = body
         return functions
 
@@ -452,6 +449,7 @@ class CToFortranTranslator:
         All variable declarations (including those from for-loop headers) are output
         before any executable statements. For non-array variables with an initialization,
         a separate assignment is generated. Updating operators (like a += b) are translated.
+        Return statements in non-main functions are translated into an assignment to the result variable.
         """
         fortran_body = ""
         body_decls = self.collect_declarations(c_body)
@@ -477,10 +475,10 @@ class CToFortranTranslator:
                 else:
                     assign_line = ""
             all_decls[var_name] = (decl_line, assign_line)
-        # Output all declarations first.
+        # Output declarations.
         for decl_line, _ in all_decls.values():
             fortran_body += self.indent() + decl_line + "\n"
-        # Then output assignment statements.
+        # Then assignments.
         for _, assign_line in all_decls.values():
             if assign_line:
                 fortran_body += self.indent() + assign_line + "\n"
@@ -498,7 +496,7 @@ class CToFortranTranslator:
             if self.is_declaration(line):
                 i += 1
                 continue
-            # Remove inline comments and work on the code portion.
+            # Remove inline comments.
             line_no_comment = line.split('//')[0].strip()
             if line_no_comment.endswith(';'):
                 line_code = line_no_comment.rstrip(';').strip()
@@ -508,6 +506,10 @@ class CToFortranTranslator:
                     i += 1
                     continue
             if line.startswith('return'):
+                # Handle return statements differently for non-main functions.
+                return_val = line.replace('return', '').replace(';', '').strip()
+                if not is_main and return_val:
+                    fortran_body += self.indent() + f"{self.current_function}_result = {self.translate_expression(return_val)}\n"
                 i += 1
                 continue
             if line.startswith('if') and '(' in line and ')' in line:
