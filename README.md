@@ -1,5 +1,5 @@
 # PyC2F
-Attempt to write a partial translator from C to Fortran in Python. Works for only a few simple programs.
+Partial translator from C to Fortran in Python. Works for only a few simple programs.
 Running
 
 `python main.py xij.c xij.f90` for the C code `xij.c`
