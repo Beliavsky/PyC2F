@@ -1,3 +1,5 @@
+from util import remove_newlines_in_quotes
+
 #!/usr/bin/env python3
 """
 Main translator class for converting C code to Fortran.
@@ -432,8 +434,10 @@ class CToFortranTranslator:
     def translate_updating_operator(self, c_line):
         """
         Translate a C updating operator (e.g. a *= b) into a Fortran assignment:
-        a *= b  ->  a = a * b
-        (handles +=, -=, *=, and /=)
+        a += b  ->  a = a + b,
+        a -= b  ->  a = a - b,
+        a *= b  ->  a = a * b,
+        a /= b  ->  a = a / b
         """
         match = re.match(r'(\w+)\s*([\+\-\*/])=\s*(.+)', c_line)
         if match:
@@ -449,7 +453,8 @@ class CToFortranTranslator:
         All variable declarations (including those from for-loop headers) are output
         before any executable statements. For non-array variables with an initialization,
         a separate assignment is generated. Updating operators (like a += b) are translated.
-        Return statements in non-main functions are translated into an assignment to the result variable.
+        In non-main functions, return statements are converted into an assignment to the result variable.
+        At the end of processing the function body, any remaining open block is flushed.
         """
         fortran_body = ""
         body_decls = self.collect_declarations(c_body)
@@ -478,7 +483,7 @@ class CToFortranTranslator:
         # Output declarations.
         for decl_line, _ in all_decls.values():
             fortran_body += self.indent() + decl_line + "\n"
-        # Then assignments.
+        # Then output assignments.
         for _, assign_line in all_decls.values():
             if assign_line:
                 fortran_body += self.indent() + assign_line + "\n"
@@ -496,7 +501,7 @@ class CToFortranTranslator:
             if self.is_declaration(line):
                 i += 1
                 continue
-            # Remove inline comments.
+            # Remove inline comments before processing.
             line_no_comment = line.split('//')[0].strip()
             if line_no_comment.endswith(';'):
                 line_code = line_no_comment.rstrip(';').strip()
@@ -506,7 +511,6 @@ class CToFortranTranslator:
                     i += 1
                     continue
             if line.startswith('return'):
-                # Handle return statements differently for non-main functions.
                 return_val = line.replace('return', '').replace(';', '').strip()
                 if not is_main and return_val:
                     fortran_body += self.indent() + f"{self.current_function}_result = {self.translate_expression(return_val)}\n"
@@ -661,4 +665,15 @@ class CToFortranTranslator:
                 continue
             fortran_body += self.indent() + f"! Untranslated: {line}\n"
             i += 1
+        # Flush any remaining open blocks.
+        while block_stack:
+            block_type, old_indent = block_stack.pop()
+            self.indent_level = old_indent
+            if block_type == 'if':
+                fortran_body += self.indent() + "end if\n"
+            elif block_type == 'for':
+                fortran_body += self.indent() + "end do\n"
+            elif block_type == 'while':
+                fortran_body += self.indent() + "end do\n"
+        fortran_body = remove_newlines_in_quotes(fortran_body)
         return fortran_body
