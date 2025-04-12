@@ -12,7 +12,7 @@ int main() {
 	int j;
 	i = 2;
 	j = 3;
-	printf("%d\n", i + j);
+	printf("%d %d %d\n", i, j, i + j);
 	return 0;
 }
 ```
